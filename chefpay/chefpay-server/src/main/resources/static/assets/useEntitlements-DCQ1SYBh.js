@@ -1,0 +1,1 @@
+import{o as e}from"./utils-Cxp3UzEx.js";import{t}from"./useQuery-BmSlmTtd.js";function n(){let n=t({queryKey:[`entitlements`],queryFn:()=>e.get(`/entitlements`),staleTime:6e4}),r=new Set(n.data?.enabledFeatures??[]);return{...n,enabledFeatures:r,isEnabled:e=>r.has(e)}}export{n as t};

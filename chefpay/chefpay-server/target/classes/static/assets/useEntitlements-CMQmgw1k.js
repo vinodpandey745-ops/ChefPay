@@ -1,0 +1,1 @@
+import{o as e}from"./utils-Boq19bSL.js";import{t}from"./useQuery-UP-ja8eT.js";function n(){let n=t({queryKey:[`entitlements`],queryFn:()=>e.get(`/entitlements`),staleTime:6e4}),r=new Set(n.data?.enabledFeatures??[]);return{...n,enabledFeatures:r,isEnabled:e=>r.has(e)}}export{n as t};

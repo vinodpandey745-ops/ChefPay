@@ -1,0 +1,197 @@
+# Default profile = local/dev, SQLite-backed, matching requirement §5
+# ("Development / Small Restaurant: SQLite"). Activate 'postgres' or 'mysql' for production.
+spring:
+  application:
+    name: chefpay-server
+  profiles:
+    active: dev
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+chefpay:
+  security:
+    jwt:
+      # Dev-only default. MUST be overridden via CHEFPAY_SECURITY_JWT_SECRET env var (or an
+      # application-*.yml override) for any non-local deployment - never ship this value.
+      secret: ${CHEFPAY_SECURITY_JWT_SECRET:dev-only-insecure-secret-change-me-before-any-real-deployment}
+      expiry-seconds: 43200 # 12h - fine for a LAN terminal that stays logged in through a shift
+  platform:
+    # Phase 2: the separate, per-install secret PlatformOwnerController requires in the
+    # X-Platform-Owner-Key header - see that controller's javadoc. Blank (the default, and every
+    # install until you deliberately set one) means the endpoint refuses every request rather than
+    # opening up - generate a real random value and set CHEFPAY_PLATFORM_OWNER_KEY before relying
+    # on this endpoint for a real deployment.
+    owner-key: ${CHEFPAY_PLATFORM_OWNER_KEY:}
+  whatsapp:
+    # Bistrodesk Phase 9 (requirement #19-22): the shared secret a real WhatsApp Business API
+    # provider's inbound webhook (Meta Cloud API, Twilio, Gupshup, etc.) would present back to
+    # SupplierReplyWebhookController, so this endpoint can tell a genuine provider callback apart
+    # from anyone else who discovers the URL - same "blank means refuse everything" convention as
+    # platform.owner-key above (see that key's comment), and the same reasoning: no real provider is
+    # integrated yet, so this can never actually fire until an operator both configures a real
+    # provider AND sets this to whatever shared value that provider will present. Deliberately
+    # provider-agnostic (a header name, not e.g. Twilio's specific request-signing scheme) - see
+    # SupplierReplyWebhookController's javadoc for why implementing one specific vendor's real
+    # signature verification isn't done here yet.
+    webhook-secret: ${CHEFPAY_WHATSAPP_WEBHOOK_SECRET:}
+  razorpay:
+    # Subscription Renewal and Plan Upgrade requirement, restaurant-owner-confirmed gateway choice
+    # (Razorpay). Install-wide, not per-branch - one restaurant business has exactly one Razorpay
+    # merchant account regardless of how many branches it has. Blank by default (every install
+    # until you deliberately configure a real Razorpay account) means RazorpayClient refuses every
+    # call rather than faking success - same "blank means refuse, not silently open" convention as
+    # platform.owner-key/whatsapp.webhook-secret above.
+    #
+    # key-id is Razorpay's PUBLIC key - safe to send to the browser (SubscriptionController returns
+    # it in the /renew/initiate response for the Checkout widget). key-secret and webhook-secret
+    # must NEVER be exposed to any HTTP response the frontend can see.
+    key-id: ${CHEFPAY_RAZORPAY_KEY_ID:}
+    key-secret: ${CHEFPAY_RAZORPAY_KEY_SECRET:}
+    webhook-secret: ${CHEFPAY_RAZORPAY_WEBHOOK_SECRET:}
+
+logging:
+  level:
+    root: INFO
+    com.chefpay: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%X{correlationId}] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%X{correlationId}] %-5level %logger{36} - %msg%n"
+  # Follow-up enhancement ("Enable Logging"): console-only logging (the only thing this app had)
+  # means a production issue is only diagnosable while someone is actively watching that terminal's
+  # console output - anything from even a few minutes ago is gone. Spring Boot's own logging
+  # autoconfiguration adds a rolling file appender automatically once logging.file.name is set - no
+  # custom logback-spring.xml needed, so every other logging behavior (console pattern, per-package
+  # levels, GlobalExceptionHandler's log.warn/log.error calls) is completely unchanged; this only
+  # adds a second, persistent destination for the exact same log lines.
+  file:
+    name: ${CHEFPAY_LOG_FILE:./logs/chefpay-server.log}
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 30
+      total-size-cap: 500MB
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  datasource:
+    # busy_timeout: SQLite's default is to fail an operation IMMEDIATELY with SQLITE_BUSY when
+    # another connection already holds a write lock, rather than waiting. With potentially several
+    # POS terminals hitting this same server concurrently, two genuinely independent requests can
+    # land a write on SQLite's single writer lock at the same instant under ordinary load - not
+    # just from some unusual in-process pattern. Set to 30s so a second writer blocks and retries
+    # instead of erroring out.
+    #
+    # Round 27 (pre-deployment audit) correction: this comment (and the matching one on the Hikari
+    # pool size below) used to justify busy_timeout/no-WAL/pool-size>=2 by pointing at
+    # NumberGeneratorService opening a second connection via its own REQUIRES_NEW transaction while
+    # the caller's transaction/connection was still open. That pattern was deliberately removed -
+    # NumberGeneratorService and AuditService both now use REQUIRED (join the caller's ambient
+    # transaction) specifically because REQUIRES_NEW's second, concurrent physical connection was a
+    # structural SQLite deadlock (see NumberGeneratorService's own javadoc for the full story), not
+    # just a WAL/busy_timeout tuning question. Nothing here currently opens two connections for one
+    # logical request, but busy_timeout/no-WAL both remain the right choice on their own, ordinary-
+    # concurrency merits below - this correction is about the *reasoning*, not the settings.
+    #
+    # Deliberately NOT using journal_mode=WAL here, despite it being the usual SQLite concurrency
+    # recommendation: WAL gives each transaction an MVCC "snapshot" taken at its first read, and a
+    # long-running read transaction (e.g. a report/dashboard query) can make its own snapshot stale
+    # if a write commits on another connection mid-flight, at which point that transaction's own
+    # later write (if it has one) fails with SQLITE_BUSY_SNAPSHOT - a *different* error from plain
+    # SQLITE_BUSY, and one busy_timeout cannot retry away, since replaying the same statement
+    # against the same stale snapshot fails identically every time; only starting a brand new
+    # transaction would help, which isn't practical to bolt onto every service method here. The
+    # default rollback-journal mode has no MVCC snapshot concept, so this class of conflict doesn't
+    # arise there - a second writer just waits (via busy_timeout) for the first writer's exclusive
+    # lock to be released, then proceeds against whatever the database's current state is.
+    url: jdbc:sqlite:${CHEFPAY_DB_PATH:./data/chefpay.db}?busy_timeout=30000
+    driver-class-name: org.sqlite.JDBC
+    # Left at Hikari's normal default (10), not restricted to 1: this server handles genuinely
+    # concurrent HTTP requests from multiple POS terminals at once, each needing its own connection
+    # for the duration of its own request - ordinary web-app concurrency, not a single request
+    # needing more than one connection at a time (see the Round 27 correction above). The
+    # busy_timeout setting above is what actually serializes concurrent writers safely; the pool
+    # just needs to stay large enough that pool exhaustion itself is never the bottleneck.
+  jpa:
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    hibernate:
+      # SQLite is the "lightweight database for dev/small restaurants" target (requirement §5).
+      # Flyway's SQL migrations below target Postgres/MySQL syntax; for SQLite we let Hibernate
+      # manage the schema directly, which is simpler and has been the path actually exercised
+      # in this environment. Re-evaluate before using SQLite in any multi-writer production setup.
+      ddl-auto: update
+    properties:
+      hibernate:
+        # Round 27 (pre-deployment audit): a pre-deployment query audit found real N+1 patterns
+        # (e.g. ReportService/DashboardService calling order.getItems() - a LAZY @OneToMany - once
+        # per order in a loop; ReplenishmentService doing per-item repository lookups in a loop).
+        # This setting makes Hibernate transparently batch up to 16 pending lazy-association/lazy-
+        # collection initializations into one `WHERE id IN (...)` query instead of issuing one
+        # query per row, with no code changes and no correctness risk - it only changes how many
+        # round-trips satisfy the exact same lazy-loading Hibernate would have done anyway. Applied
+        # to every profile (see the postgres/mysql blocks below) since the N+1 pattern itself isn't
+        # SQLite-specific.
+        default_batch_fetch_size: 16
+    show-sql: false
+  flyway:
+    enabled: false
+
+---
+spring:
+  config:
+    activate:
+      on-profile: postgres
+  datasource:
+    url: ${CHEFPAY_DB_URL:jdbc:postgresql://localhost:5432/chefpay}
+    username: ${CHEFPAY_DB_USER:chefpay}
+    password: ${CHEFPAY_DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        # See the 'dev' profile block above for why - same N+1 mitigation, applies regardless of DB.
+        default_batch_fetch_size: 16
+    show-sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+---
+spring:
+  config:
+    activate:
+      on-profile: mysql
+  datasource:
+    url: ${CHEFPAY_DB_URL:jdbc:mysql://localhost:3306/chefpay}
+    username: ${CHEFPAY_DB_USER:chefpay}
+    password: ${CHEFPAY_DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.MySQLDialect
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        # See the 'dev' profile block above for why - same N+1 mitigation, applies regardless of DB.
+        default_batch_fetch_size: 16
+    show-sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration

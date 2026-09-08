@@ -1,0 +1,19 @@
+# ChefPay client configuration
+#
+# Rename this file to "chefpay-client.properties" and place it in the SAME FOLDER as ChefPay.exe
+# (the app's install folder - normally "C:\Program Files\ChefPay\" or wherever you installed it).
+# Edit the three values below to point at your restaurant's server, then just double-click
+# ChefPay.exe as normal - no reinstall needed. See docs/DEPLOYMENT.md for the full walkthrough.
+
+# The server's address - either the domain name you set up (e.g. chefpay.yourdomain.com) or the
+# server's plain IP address (e.g. 132.145.20.10) if you haven't set up a domain/HTTPS yet.
+server.host=chefpay.yourdomain.com
+
+# "https" once you've set up a domain + SSL certificate on the server (see docs/DEPLOYMENT.md).
+# "http" if you're still on the simpler plain-HTTP setup (server.host would then be an IP address).
+server.scheme=https
+
+# Leave this as 443 for a normal HTTPS setup, or 80 for plain HTTP through a reverse proxy on the
+# standard port. If you're connecting directly to the Spring Boot server's own port instead of
+# through Nginx (e.g. during initial testing, before HTTPS is set up), use 8080 with scheme=http.
+server.port=443

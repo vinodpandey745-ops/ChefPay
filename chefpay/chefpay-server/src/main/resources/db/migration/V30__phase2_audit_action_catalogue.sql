@@ -1,0 +1,13 @@
+-- Phase 2: audit action catalogue - documentation only, no schema change. AuditLog.action already
+-- accepts an arbitrary string (see AuditService), so this migration exists purely to give Flyway a
+-- versioned, permanent record of the new action strings every Phase 2 controller uses, so they stay
+-- consistent across BranchController/UserController/PlatformOwnerController rather than drifting
+-- into ad hoc variants over time:
+--
+--   ORGANIZATION_UPDATED, BRANCH_CREATED, BRANCH_UPDATED, BRANCH_DEACTIVATED, BRANCH_DELETED,
+--   TERMINAL_CREATED, TERMINAL_UPDATED, TERMINAL_DECOMMISSIONED, USER_PIN_CHANGED,
+--   USER_CODE_CHANGED, USER_ROLE_CHANGED, USER_TERMINALS_UPDATED, SUBSCRIPTION_CREATED,
+--   SUBSCRIPTION_RENEWED, SUBSCRIPTION_PLAN_CHANGED, FEATURE_ENTITLEMENT_CHANGED.
+--
+-- Never logs a raw PIN/password/platform-owner-key - only the fact that something changed and who
+-- changed it, matching every existing audit call site's convention (see AuditService's javadoc).

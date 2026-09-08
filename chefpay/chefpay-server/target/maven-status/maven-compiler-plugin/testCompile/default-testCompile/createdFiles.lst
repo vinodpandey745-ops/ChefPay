@@ -1,0 +1,3 @@
+com\chefpay\server\billing\BillingServiceTest.class
+com\chefpay\server\inventory\InventoryServiceTest.class
+com\chefpay\server\kitchen\KitchenServiceTest.class

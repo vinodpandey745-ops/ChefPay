@@ -1,0 +1,1 @@
+import{o as e}from"./utils-DqEgWgAV.js";import{n as t}from"./Badge-DXWCc1EH.js";function n(){let n=t({queryKey:[`entitlements`],queryFn:()=>e.get(`/entitlements`),staleTime:6e4}),r=new Set(n.data?.enabledFeatures??[]);return{...n,enabledFeatures:r,isEnabled:e=>r.has(e)}}export{n as t};

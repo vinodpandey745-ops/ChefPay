@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.chefpay</groupId>
+        <artifactId>chefpay-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>chefpay-javafx</artifactId>
+    <packaging>jar</packaging>
+    <name>ChefPay JavaFX Desktop Client</name>
+    <description>
+        Cashier POS desktop client. A thin presentation layer over chefpay-server's REST +
+        WebSocket API - it does not touch the database or chefpay-core directly (§61: no
+        business logic in JavaFX controllers). Layout: View (screens/) - ViewModel - ApiClient -
+        WebSocketClient (client/).
+    </description>
+
+    <properties>
+        <!-- Launcher, not ChefPayDesktopApp itself - see Launcher's javadoc for why: a packaged
+             (jpackage) launch of an Application subclass as Main-Class fails silently. -->
+        <mainClass>com.chefpay.javafx.Launcher</mainClass>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-fxml</artifactId>
+        </dependency>
+
+        <!-- Jackson for REST DTO (de)serialization - shares no code with the server, only wire shape. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+        </dependency>
+
+        <!-- Round 11: local offline-cache SQLite file (see client.LocalDatabase) - version managed
+             centrally by the parent pom's sqlite-jdbc.version, same driver chefpay-server already
+             uses for its dev profile. -->
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+        </dependency>
+
+        <!-- QR generation for UPI "scan to pay" (Round 6) - encodes a standard upi://pay deep link
+             as a QR image shown to the customer; no payment-gateway/network code, just an encoder.
+             Only "core" is needed - UpiQrGenerator writes the BitMatrix straight into a JavaFX
+             WritableImage itself, no AWT/Swing bridge (javase's MatrixToImageWriter) required. -->
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>3.5.3</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>2.17.2</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>5.10.3</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-maven-plugin</artifactId>
+                <version>0.0.8</version>
+                <configuration>
+                    <mainClass>${mainClass}</mainClass>
+                    <!-- Without this, the plugin spawns the app via the bare "java" on PATH, which
+                         on machines with an old Oracle Java 8 install (e.g. Windows'
+                         C:\ProgramData\Oracle\Java\javapath jumping the PATH queue) launches with
+                         Java 8 even though Maven itself - and the compile - used JDK 21, causing
+                         "compiled by a more recent version... class file version 65.0 ... up to
+                         52.0". Pinning to ${java.home} (the JDK actually running this Maven
+                         process) makes the run always match the compile. -->
+                    <executable>${java.home}/bin/java</executable>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>${mainClass}</mainClass>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,0 +1,50 @@
+/*
+ * Round 12 §1 - "full touchscreen support alongside existing mouse/keyboard on the same screens."
+ * A single app-wide stylesheet (applied once, at Scene creation in ChefPayDesktopApp#showLogin) is
+ * deliberately the whole implementation here rather than editing every individual screen: every
+ * screen in this app already sets its own per-node inline styles via setStyle(...), and in JavaFX
+ * an inline style always wins over a stylesheet rule for the same property, so these baseline
+ * rules only ever raise the floor for controls that don't already specify their own font-size/
+ * padding/min-height - nothing here can override or fight an existing inline color/weight/etc, and
+ * mouse/keyboard operation is completely unaffected (these are just bigger, not different).
+ *
+ * Sizes target the ~44-48px minimum touch-target guidance (Apple HIG / Material Design) without
+ * being oversized on a normal desktop monitor - see requirement §7's identical "increase for
+ * visibility without becoming oversized" wording, which this follows for every control, not just
+ * the Kitchen Display ticket cards it was written about.
+ */
+
+.button, .toggle-button, .menu-button {
+    -fx-font-size: 13px;
+    -fx-min-height: 40px;
+    -fx-padding: 8 16 8 16;
+}
+
+.text-field, .password-field, .text-area, .combo-box, .choice-box, .date-picker {
+    -fx-font-size: 13px;
+    -fx-min-height: 38px;
+}
+
+.check-box, .radio-button {
+    -fx-font-size: 13px;
+}
+
+.check-box .box, .radio-button .radio {
+    -fx-padding: 6px;
+}
+
+.list-cell, .tree-cell {
+    -fx-padding: 8 10 8 10;
+}
+
+.table-row-cell {
+    -fx-pref-height: 34px;
+}
+
+.tab {
+    -fx-padding: 10 16 10 16;
+}
+
+.spinner .increment-arrow-button, .spinner .decrement-arrow-button {
+    -fx-padding: 8 10 8 10;
+}

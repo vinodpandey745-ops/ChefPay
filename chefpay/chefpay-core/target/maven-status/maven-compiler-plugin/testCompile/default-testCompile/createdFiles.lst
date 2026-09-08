@@ -1,0 +1,4 @@
+com\chefpay\core\domain\OrderStatusTest.class
+com\chefpay\core\domain\RestaurantTableTest.class
+com\chefpay\core\domain\OrderItemStatusTest.class
+com\chefpay\core\domain\OrderTest.class

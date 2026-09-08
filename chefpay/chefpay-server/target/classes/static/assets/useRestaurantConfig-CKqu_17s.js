@@ -1,0 +1,1 @@
+import{s as e}from"./Button-968Yh9L5.js";import{n as t}from"./Badge-Bi66Th6s.js";function n(){return t({queryKey:[`restaurant`],queryFn:()=>e.get(`/restaurant`),staleTime:6e4})}export{n as t};

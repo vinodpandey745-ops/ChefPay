@@ -1,0 +1,1260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Bistrodesk Admin</title>
+<!--
+  Bistrodesk Phase 4 (requirement #24's Admin UI). A single self-contained static page (no build
+  step, no framework) served by chefpay-server itself at /admin/, talking exclusively to
+  PlatformOwnerController's /platform/** API - the ChefPay/Bistrodesk company's own control point
+  over ONE install's licensing (plan CRUD, feature CRUD, and assigning/changing a branch's
+  subscription). This is a different audience and a different credential than every other app
+  mounted in this server: there is no AppUser login here at all, only the single shared
+  X-Platform-Owner-Key header value, entered once and cached for convenience.
+
+  This file is a REAL deployed web page served from Bistrodesk's own infrastructure (not a
+  sandboxed Cowork artifact), so using localStorage to remember the entered key is the correct,
+  standard approach for a web app like this - not the in-memory-only restriction that applies to
+  Claude-authored preview artifacts. It is still exactly as sensitive as a password: this page
+  intentionally never logs it and only ever sends it in the one header PlatformOwnerController
+  checks.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --surface-2: #fafbfc;
+    --text: #1c2530;
+    --text-muted: #6b7480;
+    --border: #e2e5ea;
+    --accent: #2c3e50;
+    --accent-2: #34495e;
+    --accent-soft: #eef1f4;
+    --success: #1f9d55;
+    --success-bg: #e8f7ee;
+    --danger: #d64545;
+    --danger-bg: #fdeaea;
+    --warn: #b3790a;
+    --warn-bg: #fdf3e0;
+    --shadow: 0 1px 3px rgba(20, 25, 35, 0.08), 0 1px 2px rgba(20, 25, 35, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181f;
+      --surface: #1d232c;
+      --surface-2: #212832;
+      --text: #eef1f5;
+      --text-muted: #9aa4b2;
+      --border: #2c333d;
+      --accent: #3d5468;
+      --accent-2: #4a6579;
+      --accent-soft: #232b35;
+      --success-bg: #16301f;
+      --danger-bg: #3a1e1e;
+      --warn-bg: #3a2f14;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  #app { min-height: 100vh; display: flex; flex-direction: column; }
+  a { color: inherit; }
+  button { font-family: inherit; }
+
+  /* ---- Screens ---- */
+  .screen { flex: 1; display: none; flex-direction: column; }
+  .screen.active { display: flex; }
+
+  /* ---- Key entry ---- */
+  #keyScreen { align-items: center; justify-content: center; padding: 24px; }
+  .key-card {
+    width: 100%; max-width: 380px; background: var(--surface); border-radius: 16px;
+    padding: 30px 26px; box-shadow: var(--shadow); border: 1px solid var(--border);
+  }
+  .key-card h1 { font-size: 21px; margin: 0 0 4px; }
+  .key-card p.tagline { color: var(--text-muted); font-size: 13px; margin: 0 0 22px; line-height: 1.5; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+  .field .hint { font-size: 11.5px; color: var(--text-muted); margin-top: 5px; line-height: 1.4; }
+  .field input, .field select, .field textarea {
+    width: 100%; padding: 11px 13px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-size: 14.5px; font-family: inherit;
+  }
+  .field textarea { resize: vertical; }
+  .field input:focus, .field select:focus, .field textarea:focus { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+  .field-row { display: flex; gap: 12px; }
+  .field-row .field { flex: 1; }
+  .checkbox-field { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .checkbox-field label { font-size: 13.5px; font-weight: 600; color: var(--text); }
+  .primary-btn {
+    width: 100%; padding: 12px; border-radius: 10px; border: none;
+    background: var(--accent); color: #fff; font-size: 14.5px; font-weight: 700; cursor: pointer;
+  }
+  .primary-btn:disabled { opacity: 0.55; cursor: default; }
+  .error-text { color: var(--danger); font-size: 13px; margin-top: 12px; text-align: center; }
+
+  /* ---- App shell ---- */
+  header.topbar {
+    position: sticky; top: 0; z-index: 20;
+    background: var(--accent); color: #fff;
+    padding: 14px 20px; display: flex; align-items: center; justify-content: space-between;
+    box-shadow: var(--shadow); gap: 12px; flex-wrap: wrap;
+  }
+  header.topbar .title { font-size: 16px; font-weight: 700; letter-spacing: 0.2px; }
+  header.topbar .subtitle { font-size: 11px; opacity: 0.75; margin-top: 1px; }
+  header.topbar button.icon-btn {
+    background: rgba(255,255,255,0.12); border: none; color: #fff; border-radius: 8px;
+    padding: 8px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+
+  nav.tabs {
+    display: flex; gap: 4px; padding: 10px 20px 0; background: var(--surface);
+    border-bottom: 1px solid var(--border); overflow-x: auto;
+  }
+  nav.tabs button {
+    background: none; border: none; padding: 10px 16px; font-size: 13.5px; font-weight: 600;
+    color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap;
+  }
+  nav.tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  main.content { flex: 1; padding: 20px; max-width: 1080px; width: 100%; margin: 0 auto; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  .panel-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 8px; flex-wrap: wrap; }
+  .panel-toolbar .count { font-size: 13px; color: var(--text-muted); }
+  .btn {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn.btn-accent { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.btn-small { padding: 6px 10px; font-size: 12px; }
+  .btn.btn-danger-outline { color: var(--danger); border-color: var(--danger); background: none; }
+
+  .empty-state { text-align: center; color: var(--text-muted); padding: 50px 24px; font-size: 14px; background: var(--surface); border-radius: 14px; border: 1px solid var(--border); }
+
+  .card-list { display: flex; flex-direction: column; gap: 10px; }
+  .item-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px; box-shadow: var(--shadow);
+  }
+  .item-card .row1 { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .item-card .name { font-size: 15px; font-weight: 700; }
+  .item-card .desc { font-size: 13px; color: var(--text-muted); margin-top: 3px; }
+  .item-card .meta-line { font-size: 12.5px; color: var(--text-muted); margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .item-card .actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+  .badge { font-size: 10.5px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; padding: 3px 8px; border-radius: 20px; white-space: nowrap; }
+  .badge.good { background: var(--success-bg); color: var(--success); }
+  .badge.bad { background: var(--danger-bg); color: var(--danger); }
+  .badge.warn { background: var(--warn-bg); color: var(--warn); }
+  .badge.neutral { background: var(--accent-soft); color: var(--text-muted); }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip { font-size: 11.5px; font-weight: 600; background: var(--accent-soft); color: var(--accent-2); padding: 4px 9px; border-radius: 20px; }
+  .chip.chip-off { background: var(--surface-2); color: var(--text-muted); text-decoration: line-through; }
+
+  .feature-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin-top: 4px; }
+  .feature-checks label {
+    display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--border);
+    border-radius: 9px; font-size: 13px; cursor: pointer; background: var(--bg);
+  }
+  .feature-checks label.checked { border-color: var(--accent); background: var(--accent-soft); }
+
+  /* ---- Modal ---- */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(10,12,16,0.5); z-index: 50;
+    display: none; align-items: center; justify-content: center; padding: 20px; overflow-y: auto;
+  }
+  .modal-backdrop.active { display: flex; }
+  .modal-sheet {
+    width: 100%; max-width: 520px; background: var(--surface); border-radius: 16px;
+    max-height: 90vh; overflow-y: auto; padding: 24px 24px 22px; box-shadow: var(--shadow);
+    animation: pop 0.16s ease-out; margin: auto;
+  }
+  @keyframes pop { from { transform: scale(0.98); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .modal-sheet h2 { font-size: 17px; margin: 0 0 4px; }
+  .modal-sheet p.modal-sub { font-size: 12.5px; color: var(--text-muted); margin: 0 0 18px; line-height: 1.5; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
+  .modal-actions button { flex: 1; padding: 11px; border-radius: 10px; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+  .btn-cancel { background: var(--bg); border: 1px solid var(--border); color: var(--text); }
+  .btn-confirm { background: var(--accent); border: none; color: #fff; }
+  .btn-confirm:disabled { opacity: 0.55; }
+  .modal-error { color: var(--danger); font-size: 12.5px; margin-top: 10px; }
+  fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px 14px; margin: 0 0 14px; }
+  fieldset legend { font-size: 11.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; padding: 0 4px; }
+
+  /* ---- Toast ---- */
+  #toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px);
+    background: #1c2530; color: #fff; padding: 11px 18px; border-radius: 30px; font-size: 13px;
+    box-shadow: var(--shadow); opacity: 0; pointer-events: none; transition: all 0.25s ease; z-index: 80;
+    max-width: 88vw; text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="keyScreen" class="screen active">
+    <div class="key-card">
+      <h1>Bistrodesk Admin</h1>
+      <p class="tagline">Platform-owner console for plan &amp; feature management and per-branch subscription assignment. This is not a restaurant staff login - it authenticates with the shared platform-owner key configured on this install.</p>
+      <form id="keyForm">
+        <div class="field">
+          <label>Platform Owner Key</label>
+          <input type="password" id="keyInput" autocomplete="off" placeholder="X-Platform-Owner-Key value">
+        </div>
+        <button type="submit" class="primary-btn" id="keySubmitBtn">Continue</button>
+      </form>
+      <div class="error-text" id="keyError"></div>
+    </div>
+  </div>
+
+  <div id="mainScreen" class="screen">
+    <header class="topbar">
+      <div>
+        <div class="title">Bistrodesk Admin</div>
+        <div class="subtitle">Platform-owner console</div>
+      </div>
+      <button class="icon-btn" id="signOutBtn">Forget Key</button>
+    </header>
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="plans">Plans</button>
+      <button class="tab-btn" data-tab="features">Features</button>
+      <button class="tab-btn" data-tab="branches">Branches &amp; Subscriptions</button>
+      <button class="tab-btn" data-tab="roles">Roles &amp; Permissions</button>
+      <button class="tab-btn" data-tab="theme">Appearance</button>
+      <button class="tab-btn" data-tab="support">Support &amp; Policy</button>
+    </nav>
+    <main class="content">
+
+      <section class="tab-panel active" id="tab-plans">
+        <div class="panel-toolbar">
+          <span class="count" id="plansCount">Loading...</span>
+          <button class="btn btn-accent" id="newPlanBtn">+ New Plan</button>
+        </div>
+        <div class="card-list" id="plansList"></div>
+      </section>
+
+      <section class="tab-panel" id="tab-features">
+        <div class="panel-toolbar">
+          <span class="count" id="featuresCount">Loading...</span>
+          <button class="btn btn-accent" id="newFeatureBtn">+ New Feature</button>
+        </div>
+        <div class="card-list" id="featuresList"></div>
+      </section>
+
+      <section class="tab-panel" id="tab-branches">
+        <div class="panel-toolbar">
+          <span class="count" id="branchesCount">Loading...</span>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-accent" id="newBranchBtn">+ New Branch</button>
+            <button class="btn" id="refreshBranchesBtn">Refresh</button>
+          </div>
+        </div>
+        <div class="card-list" id="branchesList"></div>
+      </section>
+
+      <section class="tab-panel" id="tab-roles">
+        <div class="panel-toolbar">
+          <span class="count" id="rolesCount">Loading...</span>
+        </div>
+        <p class="modal-sub" style="margin: -6px 0 14px;">Bistrodesk follow-up requirement #7: role and permission definitions moved here entirely - no POS account, however senior, can change a role's permissions any more. Assigning an existing role to a staff member still happens from that branch's own Users tab.</p>
+        <div class="card-list" id="rolesList"></div>
+      </section>
+
+      <section class="tab-panel" id="tab-theme">
+        <p class="modal-sub" style="margin: -6px 0 14px;">Follow-up requirement ("Move Appearance Settings to Admin Portal"): global UI colors, theme, and branding moved here entirely - no POS account, however senior, can change the application's global appearance any more. This applies across every branch on this install.</p>
+        <div class="field"><label>Brand name</label><input type="text" id="th_brandName" placeholder="e.g. Bistrodesk"></div>
+        <div class="field">
+          <label>Logo</label>
+          <input type="file" id="th_logoFile" accept="image/*">
+          <div class="hint" id="th_logoStatus">No logo uploaded - the default mark is shown.</div>
+          <button type="button" class="btn" id="th_logoClearBtn" style="margin-top:8px;">Remove logo</button>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Primary color</label><input type="color" id="th_primaryColor"></div>
+          <div class="field"><label>Secondary color</label><input type="color" id="th_secondaryColor"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Corner radius (px)</label><input type="number" min="0" max="32" id="th_radius"></div>
+          <div class="field">
+            <label>Sidebar style</label>
+            <select id="th_sidebarStyle">
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+              <option value="brand">Brand</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Default color mode</label>
+            <select id="th_defaultColorMode">
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
+        </div>
+        <div class="field"><label>Font family</label><input type="text" id="th_fontFamily"></div>
+        <div class="modal-error" id="th_error"></div>
+        <button class="btn btn-accent" id="th_saveBtn">Save Appearance</button>
+      </section>
+
+      <section class="tab-panel" id="tab-support">
+        <p class="modal-sub" style="margin: -6px 0 14px;">Help popup requirement ("Add a small 'Help' icon..."): the support phone/email and Terms &amp; Conditions/Privacy Policy content shown in the application's Help popup. No POS account, however senior, can change this - it is configured here and published for every branch as soon as it's saved.</p>
+        <div class="field-row">
+          <div class="field"><label>Support Phone Number</label><input type="text" id="su_supportPhone" placeholder="e.g. +91 98765 43210"></div>
+          <div class="field"><label>Support Email ID</label><input type="email" id="su_supportEmail" placeholder="e.g. support@bistrodesk.com"></div>
+        </div>
+        <div class="field"><label>Terms &amp; Conditions</label><textarea id="su_terms" rows="8" placeholder="Terms &amp; Conditions content shown to users in the Help popup."></textarea></div>
+        <div class="field"><label>Privacy Policy</label><textarea id="su_privacy" rows="8" placeholder="Privacy Policy content shown to users in the Help popup."></textarea></div>
+        <div class="modal-error" id="su_error"></div>
+        <button class="btn btn-accent" id="su_saveBtn">Save Support &amp; Policy</button>
+      </section>
+
+    </main>
+  </div>
+
+</div>
+
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal-sheet" id="modalSheet"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------------------------------------------------------------------------------------
+  // Key storage - a real deployed web page (not a sandboxed preview artifact), so localStorage
+  // is the right, standard place to cache the entered platform-owner key. See the header
+  // comment for why that's fine here the same way it's fine in /manager for a JWT.
+  // ---------------------------------------------------------------------------------------
+  var STORAGE_KEY = 'bistrodesk_admin_key_v1';
+  var state = {
+    key: null,
+    plans: [],
+    features: [],
+    branches: [],
+    subscriptions: [], // keyed by branchId via subscriptionsByBranch()
+    roles: [],
+    permissions: [],
+    theme: null, // {themeJson, version} - see loadAll()/renderTheme() below
+    themeLogoDataUrl: undefined, // undefined = unchanged since load, null = explicitly cleared, string = newly uploaded
+    support: null // {supportPhone, supportEmail, termsAndConditions, privacyPolicy, version} - see loadAll()/renderSupport() below
+  };
+
+  function loadKey() {
+    try { return localStorage.getItem(STORAGE_KEY); } catch (e) { return null; }
+  }
+  function saveKey(k) {
+    try { localStorage.setItem(STORAGE_KEY, k); } catch (e) { /* ignore */ }
+  }
+  function clearKey() {
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // API helper - every request carries X-Platform-Owner-Key, never a JWT. Same envelope
+  // handling as /manager's api() helper: PlatformOwnerController responds with the same
+  // ApiResponse<T> {success, data, message} shape as every other endpoint in this server.
+  // ---------------------------------------------------------------------------------------
+  function api(path, options) {
+    options = options || {};
+    var headers = options.headers || {};
+    headers['Content-Type'] = 'application/json';
+    headers['X-Platform-Owner-Key'] = state.key || '';
+    return fetch(path, {
+      method: options.method || 'GET',
+      headers: headers,
+      body: options.body ? JSON.stringify(options.body) : undefined
+    }).then(function (res) {
+      return res.json().then(function (envelope) {
+        if (!res.ok || envelope.success === false) {
+          var msg = (envelope && envelope.message) ? envelope.message : ('Request failed (' + res.status + ')');
+          var err = new Error(msg);
+          err.status = res.status;
+          throw err;
+        }
+        return envelope.data;
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Toast
+  // ---------------------------------------------------------------------------------------
+  var toastTimer = null;
+  function toast(message) {
+    var el = document.getElementById('toast');
+    el.textContent = message;
+    el.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2800);
+  }
+
+  function showScreen(id) {
+    Array.prototype.forEach.call(document.querySelectorAll('.screen'), function (s) {
+      s.classList.toggle('active', s.id === id);
+    });
+  }
+
+  function escapeHtml(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function fmtLimit(n) { return (n === null || n === undefined) ? 'Unlimited' : String(n); }
+  function fmtMoney(n) { return '₹' + Number(n || 0).toFixed(2); }
+
+  // ---------------------------------------------------------------------------------------
+  // Key entry
+  // ---------------------------------------------------------------------------------------
+  document.getElementById('keyForm').addEventListener('submit', function (evt) {
+    evt.preventDefault();
+    var errorEl = document.getElementById('keyError');
+    errorEl.textContent = '';
+    var candidate = document.getElementById('keyInput').value.trim();
+    if (!candidate) { errorEl.textContent = 'Enter the platform owner key.'; return; }
+    var btn = document.getElementById('keySubmitBtn');
+    btn.disabled = true;
+    btn.textContent = 'Checking...';
+    state.key = candidate;
+    // GET /platform/features is the cheapest real call to prove the key is valid before
+    // committing to it - a plain 401 from PlatformOwnerController.requireValidKey means wrong
+    // key, a 403 means the install has no CHEFPAY_PLATFORM_OWNER_KEY configured at all.
+    api('/platform/features').then(function () {
+      saveKey(state.key);
+      enterApp();
+    }).catch(function (err) {
+      state.key = null;
+      btn.disabled = false;
+      btn.textContent = 'Continue';
+      errorEl.textContent = err.message || 'Could not verify key.';
+    });
+  });
+
+  document.getElementById('signOutBtn').addEventListener('click', function () {
+    clearKey();
+    state.key = null;
+    document.getElementById('keyInput').value = '';
+    showScreen('keyScreen');
+  });
+
+  function enterApp() {
+    showScreen('mainScreen');
+    loadAll();
+  }
+
+  function loadAll() {
+    document.getElementById('plansCount').textContent = 'Loading...';
+    document.getElementById('featuresCount').textContent = 'Loading...';
+    document.getElementById('branchesCount').textContent = 'Loading...';
+    document.getElementById('rolesCount').textContent = 'Loading...';
+    Promise.all([
+      api('/platform/plans'),
+      api('/platform/features'),
+      api('/platform/branches'),
+      api('/platform/subscriptions'),
+      api('/platform/roles'),
+      api('/platform/permissions'),
+      api('/platform/theme'),
+      api('/platform/support')
+    ]).then(function (results) {
+      state.plans = results[0];
+      state.features = results[1];
+      state.branches = results[2];
+      state.subscriptions = results[3];
+      state.roles = results[4];
+      state.permissions = results[5];
+      state.theme = results[6];
+      state.themeLogoDataUrl = undefined;
+      state.support = results[7];
+      renderPlans();
+      renderFeatures();
+      renderBranches();
+      renderRoles();
+      renderTheme();
+      renderSupport();
+    }).catch(function (err) {
+      if (err.status === 401 || err.status === 403) {
+        toast('Key rejected - please sign in again.');
+        clearKey();
+        state.key = null;
+        showScreen('keyScreen');
+        return;
+      }
+      toast('Could not load: ' + err.message);
+    });
+  }
+
+  function subscriptionForBranch(branchId) {
+    for (var i = 0; i < state.subscriptions.length; i++) {
+      if (state.subscriptions[i].branchId === branchId) return state.subscriptions[i];
+    }
+    return null;
+  }
+
+  function planById(id) {
+    for (var i = 0; i < state.plans.length; i++) {
+      if (state.plans[i].id === id) return state.plans[i];
+    }
+    return null;
+  }
+
+  function roleById(id) {
+    for (var i = 0; i < state.roles.length; i++) {
+      if (state.roles[i].id === id) return state.roles[i];
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Tabs
+  // ---------------------------------------------------------------------------------------
+  Array.prototype.forEach.call(document.querySelectorAll('.tab-btn'), function (btn) {
+    btn.addEventListener('click', function () {
+      Array.prototype.forEach.call(document.querySelectorAll('.tab-btn'), function (b) { b.classList.remove('active'); });
+      Array.prototype.forEach.call(document.querySelectorAll('.tab-panel'), function (p) { p.classList.remove('active'); });
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  document.getElementById('refreshBranchesBtn').addEventListener('click', loadAll);
+
+  // ---------------------------------------------------------------------------------------
+  // Modal helpers
+  // ---------------------------------------------------------------------------------------
+  function openModal(html) {
+    document.getElementById('modalSheet').innerHTML = html;
+    document.getElementById('modalBackdrop').classList.add('active');
+  }
+  function closeModal() {
+    document.getElementById('modalBackdrop').classList.remove('active');
+  }
+  document.getElementById('modalBackdrop').addEventListener('click', function (evt) {
+    if (evt.target === this) closeModal();
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // Plans
+  // ---------------------------------------------------------------------------------------
+  function renderPlans() {
+    var count = state.plans.length;
+    document.getElementById('plansCount').textContent = count + ' plan' + (count === 1 ? '' : 's');
+    var container = document.getElementById('plansList');
+    container.innerHTML = '';
+    if (count === 0) {
+      container.innerHTML = '<div class="empty-state">No plans yet. Create the first one to start assigning subscriptions to branches.</div>';
+      return;
+    }
+    state.plans.slice().sort(function (a, b) { return a.displayOrder - b.displayOrder; }).forEach(function (p) {
+      var card = document.createElement('div');
+      card.className = 'item-card';
+      var chips = state.features.map(function (f) {
+        var on = p.featureCodes.indexOf(f.code) !== -1;
+        return '<span class="chip' + (on ? '' : ' chip-off') + '">' + escapeHtml(f.code) + '</span>';
+      }).join('');
+      card.innerHTML =
+        '<div class="row1">' +
+          '<div>' +
+            '<div class="name">' + escapeHtml(p.name) + (p.trial ? ' <span class="badge neutral">Trial</span>' : '') +
+              (p.active ? '' : ' <span class="badge bad">Inactive</span>') + '</div>' +
+            '<div class="desc">' + escapeHtml(p.description || 'No description') + '</div>' +
+          '</div>' +
+          '<div class="actions"><button class="btn btn-small" data-edit-plan="' + p.id + '">Edit</button></div>' +
+        '</div>' +
+        '<div class="meta-line">' +
+          '<span>' + fmtMoney(p.price) + ' / ' + p.durationDays + 'd</span>' +
+          '<span>GST ' + Number(p.gstPercent || 0).toFixed(1) + '%</span>' +
+          '<span>Branches: ' + fmtLimit(p.maxBranches) + '</span>' +
+          '<span>Terminals: ' + fmtLimit(p.maxTerminals) + '</span>' +
+          '<span>Users: ' + fmtLimit(p.maxUsers) + '</span>' +
+        '</div>' +
+        (state.features.length ? '<div class="chip-row">' + chips + '</div>' : '');
+      container.appendChild(card);
+    });
+    Array.prototype.forEach.call(container.querySelectorAll('[data-edit-plan]'), function (btn) {
+      btn.addEventListener('click', function () { openPlanModal(planById(btn.dataset.editPlan)); });
+    });
+  }
+
+  document.getElementById('newPlanBtn').addEventListener('click', function () { openPlanModal(null); });
+
+  function openPlanModal(plan) {
+    var isEdit = !!plan;
+    var featureChecks = state.features.map(function (f) {
+      var checked = isEdit && plan.featureCodes.indexOf(f.code) !== -1;
+      return '<label class="' + (checked ? 'checked' : '') + '" data-feature-label>' +
+        '<input type="checkbox" value="' + escapeHtml(f.code) + '" ' + (checked ? 'checked' : '') + '> ' + escapeHtml(f.code) +
+        '</label>';
+    }).join('');
+    openModal(
+      '<h2>' + (isEdit ? 'Edit Plan' : 'New Plan') + '</h2>' +
+      '<p class="modal-sub">' + (isEdit ? 'Changes apply immediately to every branch on this plan.' : 'Duration and name are required; every limit left blank means unlimited.') + '</p>' +
+      '<div class="field"><label>Name</label><input type="text" id="pf_name" value="' + escapeHtml(isEdit ? plan.name : '') + '"></div>' +
+      '<div class="field"><label>Description</label><textarea id="pf_description" rows="2">' + escapeHtml(isEdit ? (plan.description || '') : '') + '</textarea></div>' +
+      '<div class="field-row">' +
+        '<div class="field"><label>Duration (days)</label><input type="number" min="1" id="pf_durationDays" value="' + (isEdit ? plan.durationDays : 30) + '"></div>' +
+        '<div class="field"><label>Display Order</label><input type="number" id="pf_displayOrder" value="' + (isEdit ? plan.displayOrder : 0) + '"></div>' +
+      '</div>' +
+      '<div class="field-row">' +
+        '<div class="field"><label>Price</label><input type="number" step="0.01" min="0" id="pf_price" value="' + (isEdit ? plan.price : 0) + '"></div>' +
+        '<div class="field"><label>GST %</label><input type="number" step="0.01" min="0" id="pf_gstPercent" value="' + (isEdit ? plan.gstPercent : 0) + '"></div>' +
+      '</div>' +
+      '<fieldset><legend>Limits (blank = unlimited)</legend>' +
+        '<div class="field-row">' +
+          '<div class="field"><label>Max Branches</label><input type="number" min="1" id="pf_maxBranches" value="' + (isEdit && plan.maxBranches !== null ? plan.maxBranches : '') + '"></div>' +
+          '<div class="field"><label>Max Terminals</label><input type="number" min="1" id="pf_maxTerminals" value="' + (isEdit && plan.maxTerminals !== null ? plan.maxTerminals : '') + '"></div>' +
+          '<div class="field"><label>Max Users</label><input type="number" min="1" id="pf_maxUsers" value="' + (isEdit && plan.maxUsers !== null ? plan.maxUsers : '') + '"></div>' +
+        '</div>' +
+      '</fieldset>' +
+      '<div class="checkbox-field"><input type="checkbox" id="pf_trial" ' + (isEdit && plan.trial ? 'checked' : '') + '><label for="pf_trial">Trial plan</label></div>' +
+      '<div class="checkbox-field"><input type="checkbox" id="pf_active" ' + (!isEdit || plan.active ? 'checked' : '') + '><label for="pf_active">Active (selectable/enforced)</label></div>' +
+      (state.features.length
+        ? '<fieldset><legend>Included Features</legend><div class="feature-checks" id="pf_features">' + featureChecks + '</div></fieldset>'
+        : '<p class="modal-sub">No features exist yet - add one from the Features tab first.</p>') +
+      '<div class="modal-error" id="pf_error"></div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn-cancel" id="pf_cancel">Cancel</button>' +
+        '<button class="btn-confirm" id="pf_save">' + (isEdit ? 'Save Changes' : 'Create Plan') + '</button>' +
+      '</div>'
+    );
+    Array.prototype.forEach.call(document.querySelectorAll('#pf_features label'), function (label) {
+      label.querySelector('input').addEventListener('change', function () {
+        label.classList.toggle('checked', this.checked);
+      });
+    });
+    document.getElementById('pf_cancel').addEventListener('click', closeModal);
+    document.getElementById('pf_save').addEventListener('click', function () { submitPlan(plan); });
+  }
+
+  function numOrNull(id) {
+    var v = document.getElementById(id).value;
+    return (v === null || v === '') ? null : Number(v);
+  }
+
+  function submitPlan(existingPlan) {
+    var errorEl = document.getElementById('pf_error');
+    errorEl.textContent = '';
+    var name = document.getElementById('pf_name').value.trim();
+    var durationDays = numOrNull('pf_durationDays');
+    if (!name) { errorEl.textContent = 'Name is required.'; return; }
+    if (!durationDays || durationDays <= 0) { errorEl.textContent = 'Duration must be a positive number of days.'; return; }
+    var featureCodes = Array.prototype.map.call(
+      document.querySelectorAll('#pf_features input:checked'), function (cb) { return cb.value; }
+    );
+    var body = {
+      name: name,
+      description: document.getElementById('pf_description').value.trim() || null,
+      durationDays: durationDays,
+      price: numOrNull('pf_price') || 0,
+      gstPercent: numOrNull('pf_gstPercent') || 0,
+      maxBranches: numOrNull('pf_maxBranches'),
+      maxTerminals: numOrNull('pf_maxTerminals'),
+      maxUsers: numOrNull('pf_maxUsers'),
+      trial: document.getElementById('pf_trial').checked,
+      active: document.getElementById('pf_active').checked,
+      displayOrder: numOrNull('pf_displayOrder') || 0,
+      featureCodes: featureCodes,
+      version: null
+    };
+    var btn = document.getElementById('pf_save');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    var req = existingPlan
+      ? api('/platform/plans/' + existingPlan.id, { method: 'PATCH', body: body })
+      : api('/platform/plans', { method: 'POST', body: body });
+    req.then(function () {
+      closeModal();
+      toast(existingPlan ? 'Plan updated.' : 'Plan created.');
+      loadAll();
+    }).catch(function (err) {
+      btn.disabled = false;
+      btn.textContent = existingPlan ? 'Save Changes' : 'Create Plan';
+      errorEl.textContent = err.message || 'Could not save plan.';
+    });
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Features
+  // ---------------------------------------------------------------------------------------
+  function renderFeatures() {
+    var count = state.features.length;
+    document.getElementById('featuresCount').textContent = count + ' feature' + (count === 1 ? '' : 's');
+    var container = document.getElementById('featuresList');
+    container.innerHTML = '';
+    if (count === 0) {
+      container.innerHTML = '<div class="empty-state">No features yet. These are the capability codes plans can include (e.g. INVENTORY_MANAGEMENT, ADVANCED_REPORTS).</div>';
+      return;
+    }
+    state.features.slice().sort(function (a, b) { return a.code.localeCompare(b.code); }).forEach(function (f) {
+      var card = document.createElement('div');
+      card.className = 'item-card';
+      card.innerHTML =
+        '<div class="row1">' +
+          '<div><div class="name">' + escapeHtml(f.code) + '</div>' +
+          '<div class="desc">' + escapeHtml(f.description || 'No description') + '</div></div>' +
+        '</div>';
+      container.appendChild(card);
+    });
+  }
+
+  document.getElementById('newFeatureBtn').addEventListener('click', function () {
+    openModal(
+      '<h2>New Feature</h2>' +
+      '<p class="modal-sub">A feature is a capability code a plan can include or omit - it is only meaningful once a controller in the server is gated on it with @RequiresFeature.</p>' +
+      '<div class="field"><label>Code</label><input type="text" id="ff_code" placeholder="e.g. ADVANCED_REPORTS" style="text-transform:uppercase;"></div>' +
+      '<div class="field"><label>Description</label><textarea id="ff_description" rows="2"></textarea></div>' +
+      '<div class="modal-error" id="ff_error"></div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn-cancel" id="ff_cancel">Cancel</button>' +
+        '<button class="btn-confirm" id="ff_save">Create Feature</button>' +
+      '</div>'
+    );
+    document.getElementById('ff_cancel').addEventListener('click', closeModal);
+    document.getElementById('ff_save').addEventListener('click', function () {
+      var errorEl = document.getElementById('ff_error');
+      errorEl.textContent = '';
+      var code = document.getElementById('ff_code').value.trim();
+      if (!code) { errorEl.textContent = 'Code is required.'; return; }
+      var btn = document.getElementById('ff_save');
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      api('/platform/features', {
+        method: 'POST',
+        body: { code: code, description: document.getElementById('ff_description').value.trim() || null }
+      }).then(function () {
+        closeModal();
+        toast('Feature created.');
+        loadAll();
+      }).catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = 'Create Feature';
+        errorEl.textContent = err.message || 'Could not create feature.';
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // Branches & Subscriptions
+  //
+  // Bistrodesk branch-isolation release (requirement #2, user-confirmed decision): branch
+  // *creation* moved here from the POS app entirely - this is now the ONLY place a new branch
+  // can be created, via POST /platform/branches (PlatformOwnerController#createBranch), which
+  // enforces the exact same unique-branch-code generation and MULTI_BRANCH/maxBranches
+  // plan-capacity gate BranchController#create used to.
+  // ---------------------------------------------------------------------------------------
+  document.getElementById('newBranchBtn').addEventListener('click', function () { openBranchModal(); });
+
+  function openBranchModal() {
+    openModal(
+      '<h2>New Branch</h2>' +
+      '<p class="modal-sub">A unique branch code is generated automatically once this is saved. Adding a second (or later) branch requires the restaurant\'s current plan to include MULTI_BRANCH with room under its branch limit.</p>' +
+      '<div class="field"><label>Name</label><input type="text" id="bf_name" placeholder="e.g. Downtown"></div>' +
+      '<div class="field"><label>Address</label><input type="text" id="bf_address"></div>' +
+      '<div class="field"><label>Phone</label><input type="text" id="bf_phone"></div>' +
+      '<div class="field"><label>Time Zone</label><select id="bf_timezone"></select></div>' +
+      '<div class="modal-error" id="bf_error"></div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn-cancel" id="bf_cancel">Cancel</button>' +
+        '<button class="btn-confirm" id="bf_save">Create Branch</button>' +
+      '</div>'
+    );
+    document.getElementById('bf_cancel').addEventListener('click', closeModal);
+    document.getElementById('bf_save').addEventListener('click', submitBranch);
+    populateTimezoneSelect(document.getElementById('bf_timezone'));
+  }
+
+  // Follow-up enhancement ("Local Time Zone During Branch Creation"): no external library is
+  // available in this vanilla-JS, no-build-step page, so the full IANA zone list comes from the
+  // browser's own Intl.supportedValuesOf - broadly supported in modern browsers (Chrome/Edge 99+,
+  // Firefox 102+, Safari 15.4+), which is what any admin using this console is running. Falls back
+  // to a short common-zone list if the browser doesn't support it, so the form still works either
+  // way; the server itself defaults to the restaurant's own timezone if this is ever left unset.
+  function populateTimezoneSelect(selectEl) {
+    var zones;
+    try {
+      zones = Intl.supportedValuesOf('timeZone');
+    } catch (e) {
+      zones = ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Europe/London', 'Europe/Paris',
+        'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'UTC'];
+    }
+    var browserZone = null;
+    try { browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) {}
+    selectEl.innerHTML = '<option value="">Use restaurant default</option>' + zones.map(function (z) {
+      return '<option value="' + z + '"' + (z === browserZone ? ' selected' : '') + '>' + z + '</option>';
+    }).join('');
+  }
+
+  function submitBranch() {
+    var errorEl = document.getElementById('bf_error');
+    errorEl.textContent = '';
+    var name = document.getElementById('bf_name').value.trim();
+    if (!name) { errorEl.textContent = 'Name is required.'; return; }
+    var body = {
+      name: name,
+      address: document.getElementById('bf_address').value.trim() || null,
+      phone: document.getElementById('bf_phone').value.trim() || null,
+      timezone: document.getElementById('bf_timezone').value || null
+    };
+    var btn = document.getElementById('bf_save');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    api('/platform/branches', { method: 'POST', body: body }).then(function () {
+      closeModal();
+      toast('Branch created.');
+      loadAll();
+    }).catch(function (err) {
+      btn.disabled = false;
+      btn.textContent = 'Create Branch';
+      errorEl.textContent = err.message || 'Could not create branch.';
+    });
+  }
+
+  function statusBadgeClass(status) {
+    if (status === 'ACTIVE') return 'good';
+    if (status === 'EXPIRING_SOON' || status === 'GRACE_PERIOD') return 'warn';
+    if (status === 'EXPIRED' || status === 'SUSPENDED') return 'bad';
+    return 'neutral';
+  }
+
+  function renderBranches() {
+    var count = state.branches.length;
+    document.getElementById('branchesCount').textContent = count + ' branch' + (count === 1 ? '' : 'es');
+    var container = document.getElementById('branchesList');
+    container.innerHTML = '';
+    if (count === 0) {
+      container.innerHTML = '<div class="empty-state">No branches on this install yet.</div>';
+      return;
+    }
+    state.branches.forEach(function (b) {
+      var sub = subscriptionForBranch(b.id);
+      var card = document.createElement('div');
+      card.className = 'item-card';
+      var statusHtml = sub
+        ? '<span class="badge ' + statusBadgeClass(sub.status) + '">' + escapeHtml(sub.status) + '</span>'
+        : '<span class="badge bad">No Subscription</span>';
+      // Follow-up enhancement ("Subscription Plan Reactivation"): a plain "Manage" edit lets an
+      // admin pick ACTIVE from the status dropdown without also extending the expiry date - which
+      // then silently flips right back on the next entitlement check (see
+      // PlatformOwnerDtos.ReactivateSubscriptionRequest's javadoc). This dedicated button is only
+      // shown once there's actually something to reactivate, and always moves the expiry date
+      // together with the status so it can't be used incorrectly.
+      var needsReactivate = sub && (sub.status === 'EXPIRED' || sub.status === 'GRACE_PERIOD' || sub.status === 'SUSPENDED');
+      card.innerHTML =
+        '<div class="row1">' +
+          '<div>' +
+            '<div class="name">' + escapeHtml(b.name) + (b.active ? '' : ' <span class="badge bad">Inactive Branch</span>') + '</div>' +
+            '<div class="desc">Code: ' + escapeHtml(b.branchCode || '-') + '</div>' +
+          '</div>' +
+          '<div class="actions">' + statusHtml +
+            (needsReactivate ? '<button class="btn btn-small btn-accent" data-reactivate-branch="' + b.id + '">Reactivate</button>' : '') +
+            '<button class="btn btn-small" data-manage-branch="' + b.id + '">' +
+            (sub ? 'Manage' : 'Assign Plan') + '</button></div>' +
+        '</div>' +
+        (sub
+          ? '<div class="meta-line">' +
+              '<span>Plan: ' + escapeHtml(sub.planName) + '</span>' +
+              '<span>Expires: ' + escapeHtml(sub.expiryDate) + '</span>' +
+              '<span>Remaining: ' + sub.remainingDays + 'd</span>' +
+              (sub.supportPhone ? '<span>Support: ' + escapeHtml(sub.supportPhone) + '</span>' : '') +
+            '</div>'
+          : '');
+      container.appendChild(card);
+    });
+    Array.prototype.forEach.call(container.querySelectorAll('[data-manage-branch]'), function (btn) {
+      btn.addEventListener('click', function () {
+        var branch = state.branches.find(function (b) { return b.id === btn.dataset.manageBranch; });
+        openSubscriptionModal(branch, subscriptionForBranch(branch.id));
+      });
+    });
+    Array.prototype.forEach.call(container.querySelectorAll('[data-reactivate-branch]'), function (btn) {
+      btn.addEventListener('click', function () {
+        var branch = state.branches.find(function (b) { return b.id === btn.dataset.reactivateBranch; });
+        openReactivateModal(branch, subscriptionForBranch(branch.id));
+      });
+    });
+  }
+
+  /** Follow-up enhancement ("Subscription Plan Reactivation"). Defaults the new expiry date to
+   * "today + the subscription's own plan durationDays" (same default the server itself falls back
+   * to if this field were omitted) so the common case is a single click plus one confirm, while
+   * still letting the admin pick a different date for a partial-period comp/goodwill extension. */
+  function openReactivateModal(branch, sub) {
+    var plan = planById(sub.planId);
+    var durationDays = plan ? plan.durationDays : 30;
+    var defaultExpiry = new Date(Date.now() + durationDays * 86400000).toISOString().slice(0, 10);
+    openModal(
+      '<h2>Reactivate ' + escapeHtml(branch.name) + '</h2>' +
+      '<p class="modal-sub">This subscription is currently <strong>' + escapeHtml(sub.status) + '</strong> ' +
+        '(expired ' + escapeHtml(sub.expiryDate) + '). Reactivating sets it back to ACTIVE and moves the ' +
+        'expiry date forward together - changing only the status would silently revert on the next check.</p>' +
+      '<div class="field"><label>New expiry date</label><input type="date" id="rf_expiryDate" value="' + defaultExpiry + '"></div>' +
+      '<div class="modal-error" id="rf_error"></div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn-cancel" id="rf_cancel">Cancel</button>' +
+        '<button class="btn-confirm" id="rf_save">Reactivate</button>' +
+      '</div>'
+    );
+    document.getElementById('rf_cancel').addEventListener('click', closeModal);
+    document.getElementById('rf_save').addEventListener('click', function () { submitReactivate(branch, sub); });
+  }
+
+  function submitReactivate(branch, sub) {
+    var errorEl = document.getElementById('rf_error');
+    errorEl.textContent = '';
+    var expiryDate = document.getElementById('rf_expiryDate').value;
+    if (!expiryDate) { errorEl.textContent = 'Pick a new expiry date.'; return; }
+    var btn = document.getElementById('rf_save');
+    btn.disabled = true;
+    btn.textContent = 'Reactivating...';
+    api('/platform/subscriptions/' + branch.id + '/reactivate', {
+      method: 'POST',
+      body: { newExpiryDate: expiryDate, version: sub.version }
+    }).then(function () {
+      closeModal();
+      toast('Subscription reactivated.');
+      loadAll();
+    }).catch(function (err) {
+      btn.disabled = false;
+      btn.textContent = 'Reactivate';
+      errorEl.textContent = err.message || 'Could not reactivate subscription.';
+    });
+  }
+
+  function openSubscriptionModal(branch, sub) {
+    if (state.plans.length === 0) {
+      toast('Create a plan first, from the Plans tab.');
+      return;
+    }
+    var isEdit = !!sub;
+    var planOptions = state.plans.filter(function (p) { return p.active || (isEdit && p.id === sub.planId); }).map(function (p) {
+      var selected = isEdit && p.id === sub.planId ? 'selected' : '';
+      return '<option value="' + p.id + '" ' + selected + '>' + escapeHtml(p.name) + ' (' + p.durationDays + 'd)</option>';
+    }).join('');
+    var statusOptions = ['ACTIVE', 'EXPIRING_SOON', 'GRACE_PERIOD', 'EXPIRED', 'SUSPENDED'].map(function (s) {
+      var selected = isEdit && sub.status === s ? 'selected' : '';
+      return '<option value="' + s + '" ' + selected + '>' + s + '</option>';
+    }).join('');
+    openModal(
+      '<h2>' + escapeHtml(branch.name) + '</h2>' +
+      '<p class="modal-sub">' + (isEdit
+        ? 'Every status besides SUSPENDED is normally recomputed automatically from the expiry/grace-period dates - only change Status here to force a manual override (e.g. a support hold), or leave it as-is.'
+        : 'This branch has no subscription yet - creating one assigns its first plan and starts entitlement enforcement.') + '</p>' +
+      '<div class="field"><label>Plan</label><select id="sf_planId">' + planOptions + '</select></div>' +
+      '<div class="field-row">' +
+        '<div class="field"><label>Start Date</label><input type="date" id="sf_startDate" value="' + (isEdit ? sub.startDate : '') + '"></div>' +
+        '<div class="field"><label>Expiry Date</label><input type="date" id="sf_expiryDate" value="' + (isEdit ? sub.expiryDate : '') + '"></div>' +
+      '</div>' +
+      '<div class="field-row">' +
+        '<div class="field"><label>Grace Period (days)</label><input type="number" min="0" id="sf_gracePeriodDays" value="' + (isEdit ? sub.gracePeriodDays : 3) + '"></div>' +
+        '<div class="field"><label>Status Override</label><select id="sf_status"><option value="">(leave as computed)</option>' + statusOptions + '</select></div>' +
+      '</div>' +
+      '<div class="field"><label>Warning Thresholds (days, comma-separated)</label><input type="text" id="sf_warningThresholdsDays" value="' + escapeHtml(isEdit ? sub.warningThresholdsDays : '30,15,7,3,1') + '"></div>' +
+      '<div class="field"><label>Support Phone</label><input type="text" id="sf_supportPhone" value="' + escapeHtml(isEdit ? (sub.supportPhone || '') : '') + '"></div>' +
+      '<div class="modal-error" id="sf_error"></div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn-cancel" id="sf_cancel">Cancel</button>' +
+        '<button class="btn-confirm" id="sf_save">' + (isEdit ? 'Save Changes' : 'Assign Plan') + '</button>' +
+      '</div>'
+    );
+    document.getElementById('sf_cancel').addEventListener('click', closeModal);
+    document.getElementById('sf_save').addEventListener('click', function () { submitSubscription(branch, sub); });
+  }
+
+  function submitSubscription(branch, existingSub) {
+    var errorEl = document.getElementById('sf_error');
+    errorEl.textContent = '';
+    var planId = document.getElementById('sf_planId').value;
+    if (!planId) { errorEl.textContent = 'A plan is required.'; return; }
+    var startDate = document.getElementById('sf_startDate').value || null;
+    var expiryDate = document.getElementById('sf_expiryDate').value || null;
+    var gracePeriodDays = numOrNull('sf_gracePeriodDays');
+    var statusRaw = document.getElementById('sf_status').value;
+    var body = {
+      branchId: branch.id,
+      planId: planId,
+      startDate: startDate,
+      expiryDate: expiryDate,
+      gracePeriodDays: gracePeriodDays,
+      warningThresholdsDays: document.getElementById('sf_warningThresholdsDays').value.trim() || null,
+      supportPhone: document.getElementById('sf_supportPhone').value.trim() || null,
+      status: statusRaw || null
+    };
+    var btn = document.getElementById('sf_save');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    api('/platform/subscription', { method: 'POST', body: body }).then(function () {
+      closeModal();
+      toast(existingSub ? 'Subscription updated.' : 'Plan assigned.');
+      loadAll();
+    }).catch(function (err) {
+      btn.disabled = false;
+      btn.textContent = existingSub ? 'Save Changes' : 'Assign Plan';
+      errorEl.textContent = err.message || 'Could not save subscription.';
+    });
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Roles & Permissions
+  //
+  // Bistrodesk follow-up requirement #7 ("move the role and permission to admin portal which
+  // can be modified only by bistrodesk team or admin. remove completely from application"):
+  // this is now the ONLY place a role's permission set can be changed - see RoleController's
+  // javadoc for why the POS-reachable API only keeps a read-only GET /api/roles for the "Add
+  // Staff"/"Edit Staff" role-name picker. Roles themselves are never created or deleted from
+  // here (the fixed role set - OWNER/ADMIN/MANAGER/CASHIER/WAITER/KITCHEN/VIEW_ONLY - is part of
+  // the app's own seed data, DataSeeder#ROLE_PERMISSIONS), only which permissions each one holds.
+  // ---------------------------------------------------------------------------------------
+  function renderRoles() {
+    var count = state.roles.length;
+    document.getElementById('rolesCount').textContent = count + ' role' + (count === 1 ? '' : 's');
+    var container = document.getElementById('rolesList');
+    container.innerHTML = '';
+    if (count === 0) {
+      container.innerHTML = '<div class="empty-state">No roles found.</div>';
+      return;
+    }
+    state.roles.slice().sort(function (a, b) { return a.name.localeCompare(b.name); }).forEach(function (r) {
+      var card = document.createElement('div');
+      card.className = 'item-card';
+      card.innerHTML =
+        '<div class="row1">' +
+          '<div>' +
+            '<div class="name">' + escapeHtml(r.name) + '</div>' +
+            '<div class="desc">' + escapeHtml(r.description || 'No description') + '</div>' +
+          '</div>' +
+          '<div class="actions"><button class="btn btn-small" data-manage-role="' + r.id + '">Manage</button></div>' +
+        '</div>' +
+        '<div class="meta-line"><span>' + r.permissionCodes.length + ' of ' + state.permissions.length + ' permissions granted</span></div>';
+      container.appendChild(card);
+    });
+    Array.prototype.forEach.call(container.querySelectorAll('[data-manage-role]'), function (btn) {
+      btn.addEventListener('click', function () { openRoleModal(roleById(btn.dataset.manageRole)); });
+    });
+  }
+
+  function openRoleModal(role) {
+    if (state.permissions.length === 0) {
+      toast('No permissions exist to assign.');
+      return;
+    }
+    var permChecks = state.permissions.slice().sort(function (a, b) { return a.code.localeCompare(b.code); }).map(function (p) {
+      var checked = role.permissionCodes.indexOf(p.code) !== -1;
+      return '<label class="' + (checked ? 'checked' : '') + '" title="' + escapeHtml(p.description || '') + '">' +
+        '<input type="checkbox" value="' + escapeHtml(p.code) + '" ' + (checked ? 'checked' : '') + '> ' + escapeHtml(p.code) +
+        '</label>';
+    }).join('');
+    openModal(
+      '<h2>' + escapeHtml(role.name) + '</h2>' +
+      '<p class="modal-sub">Changes apply immediately to every staff member currently holding this role, across every branch.</p>' +
+      '<fieldset><legend>Permissions</legend><div class="feature-checks" id="rf_permissions">' + permChecks + '</div></fieldset>' +
+      '<div class="modal-error" id="rf_error"></div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn-cancel" id="rf_cancel">Cancel</button>' +
+        '<button class="btn-confirm" id="rf_save">Save Changes</button>' +
+      '</div>'
+    );
+    Array.prototype.forEach.call(document.querySelectorAll('#rf_permissions label'), function (label) {
+      label.querySelector('input').addEventListener('change', function () {
+        label.classList.toggle('checked', this.checked);
+      });
+    });
+    document.getElementById('rf_cancel').addEventListener('click', closeModal);
+    document.getElementById('rf_save').addEventListener('click', function () { submitRolePermissions(role); });
+  }
+
+  function submitRolePermissions(role) {
+    var errorEl = document.getElementById('rf_error');
+    errorEl.textContent = '';
+    var permissionCodes = Array.prototype.map.call(
+      document.querySelectorAll('#rf_permissions input:checked'), function (cb) { return cb.value; }
+    );
+    var btn = document.getElementById('rf_save');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    api('/platform/roles/' + role.id + '/permissions', {
+      method: 'PATCH',
+      body: { permissionCodes: permissionCodes, version: role.version }
+    }).then(function () {
+      closeModal();
+      toast('Role permissions updated.');
+      loadAll();
+    }).catch(function (err) {
+      btn.disabled = false;
+      btn.textContent = 'Save Changes';
+      errorEl.textContent = err.message || 'Could not save role permissions.';
+    });
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Appearance (follow-up requirement "Move Appearance Settings to Admin Portal")
+  //
+  // ThemeSettings.themeJson (see that entity's javadoc) is an opaque JSON blob to the server -
+  // this is the one place outside chefpay-web itself that has to know its shape. THEME_DEFAULTS
+  // mirrors chefpay-web/src/lib/appearance.ts's DEFAULT_APPEARANCE exactly - keep these two in
+  // sync if that shape ever changes, the same "server treats it as opaque, one specific frontend
+  // owns the shape" contract that file's own header comment documents.
+  // ---------------------------------------------------------------------------------------
+  var THEME_DEFAULTS = {
+    brandName: 'Bistrodesk',
+    logoDataUrl: null,
+    primaryColor: '#4f46e5',
+    secondaryColor: '#0ea5e9',
+    radius: 16,
+    sidebarStyle: 'light',
+    defaultColorMode: 'system',
+    fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
+  };
+
+  function parseThemeJson(json) {
+    if (!json) return THEME_DEFAULTS;
+    try {
+      var parsed = JSON.parse(json);
+      var merged = {};
+      var key;
+      for (key in THEME_DEFAULTS) { merged[key] = THEME_DEFAULTS[key]; }
+      for (key in parsed) { merged[key] = parsed[key]; }
+      return merged;
+    } catch (e) {
+      return THEME_DEFAULTS;
+    }
+  }
+
+  function renderTheme() {
+    if (!state.theme) return;
+    var config = parseThemeJson(state.theme.themeJson);
+    document.getElementById('th_brandName').value = config.brandName || '';
+    document.getElementById('th_primaryColor').value = config.primaryColor || THEME_DEFAULTS.primaryColor;
+    document.getElementById('th_secondaryColor').value = config.secondaryColor || THEME_DEFAULTS.secondaryColor;
+    document.getElementById('th_radius').value = config.radius != null ? config.radius : THEME_DEFAULTS.radius;
+    document.getElementById('th_sidebarStyle').value = config.sidebarStyle || THEME_DEFAULTS.sidebarStyle;
+    document.getElementById('th_defaultColorMode').value = config.defaultColorMode || THEME_DEFAULTS.defaultColorMode;
+    document.getElementById('th_fontFamily').value = config.fontFamily || THEME_DEFAULTS.fontFamily;
+    document.getElementById('th_logoStatus').textContent = config.logoDataUrl
+      ? 'A custom logo is currently set.' : 'No logo uploaded - the default mark is shown.';
+    document.getElementById('th_logoFile').value = '';
+  }
+
+  document.getElementById('th_logoFile').addEventListener('change', function (evt) {
+    var file = evt.target.files && evt.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      state.themeLogoDataUrl = String(reader.result);
+      document.getElementById('th_logoStatus').textContent = 'New logo selected (not saved yet).';
+    };
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById('th_logoClearBtn').addEventListener('click', function () {
+    state.themeLogoDataUrl = null;
+    document.getElementById('th_logoFile').value = '';
+    document.getElementById('th_logoStatus').textContent = 'Logo will be removed on save.';
+  });
+
+  document.getElementById('th_saveBtn').addEventListener('click', function () {
+    var errorEl = document.getElementById('th_error');
+    errorEl.textContent = '';
+    if (!state.theme) return;
+    var current = parseThemeJson(state.theme.themeJson);
+    var config = {
+      brandName: document.getElementById('th_brandName').value.trim() || THEME_DEFAULTS.brandName,
+      // undefined (never touched the file input/remove button this session) keeps whatever was
+      // already saved - same null-means-unchanged discipline used everywhere else in this app.
+      logoDataUrl: state.themeLogoDataUrl === undefined ? current.logoDataUrl : state.themeLogoDataUrl,
+      primaryColor: document.getElementById('th_primaryColor').value,
+      secondaryColor: document.getElementById('th_secondaryColor').value,
+      radius: Number(document.getElementById('th_radius').value) || 0,
+      sidebarStyle: document.getElementById('th_sidebarStyle').value,
+      defaultColorMode: document.getElementById('th_defaultColorMode').value,
+      fontFamily: document.getElementById('th_fontFamily').value.trim() || THEME_DEFAULTS.fontFamily
+    };
+    var btn = document.getElementById('th_saveBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    api('/platform/theme', {
+      method: 'PUT',
+      body: { themeJson: JSON.stringify(config), version: state.theme.version }
+    }).then(function (dto) {
+      state.theme = dto;
+      state.themeLogoDataUrl = undefined;
+      btn.disabled = false;
+      btn.textContent = 'Save Appearance';
+      toast('Appearance saved. Every branch picks this up on next page load.');
+      renderTheme();
+    }).catch(function (err) {
+      btn.disabled = false;
+      btn.textContent = 'Save Appearance';
+      errorEl.textContent = err.message || 'Could not save appearance settings.';
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // Support & Policy (requirement "Add a small 'Help' icon..." - "Admin Panel (BistroDesk):
+  // Add a new Support & Policy Configuration section...")
+  //
+  // Unlike Appearance's themeJson (an opaque blob), these are four plain columns with a fixed
+  // shape - see SupportDtos.SupportSettingsDto - so no parse/merge-with-defaults step is needed,
+  // just a direct field-by-field render/save.
+  // ---------------------------------------------------------------------------------------
+  function renderSupport() {
+    if (!state.support) return;
+    document.getElementById('su_supportPhone').value = state.support.supportPhone || '';
+    document.getElementById('su_supportEmail').value = state.support.supportEmail || '';
+    document.getElementById('su_terms').value = state.support.termsAndConditions || '';
+    document.getElementById('su_privacy').value = state.support.privacyPolicy || '';
+  }
+
+  document.getElementById('su_saveBtn').addEventListener('click', function () {
+    var errorEl = document.getElementById('su_error');
+    errorEl.textContent = '';
+    if (!state.support) return;
+    var body = {
+      supportPhone: document.getElementById('su_supportPhone').value.trim(),
+      supportEmail: document.getElementById('su_supportEmail').value.trim(),
+      termsAndConditions: document.getElementById('su_terms').value,
+      privacyPolicy: document.getElementById('su_privacy').value,
+      version: state.support.version
+    };
+    var btn = document.getElementById('su_saveBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    api('/platform/support', { method: 'PUT', body: body }).then(function (dto) {
+      state.support = dto;
+      btn.disabled = false;
+      btn.textContent = 'Save Support & Policy';
+      toast('Support & Policy settings saved. Every branch\'s Help popup picks this up immediately.');
+      renderSupport();
+    }).catch(function (err) {
+      btn.disabled = false;
+      btn.textContent = 'Save Support & Policy';
+      errorEl.textContent = err.message || 'Could not save support settings.';
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // Boot
+  // ---------------------------------------------------------------------------------------
+  var existingKey = loadKey();
+  if (existingKey) {
+    state.key = existingKey;
+    enterApp();
+  }
+})();
+</script>
+</body>
+</html>
