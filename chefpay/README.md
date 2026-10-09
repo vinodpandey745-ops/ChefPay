@@ -205,8 +205,7 @@ actually uses. Neither was a `BillingService` bug; both were test-code issues th
 read-throughs are a floor, not a substitute, for actually running the suite.
 
 After rebuilding, clicking a table's Coke or Butter Chicken to add it to an order surfaced a fourth
-real bug: `org.hibernate.TransientObjectException: object references an unsaved transient instance
-- save the transient instance before flushing: com.chefpay.core.domain.OrderItem`, thrown from
+real bug: `org.hibernate.TransientObjectException: object references an unsaved transient instance - save the transient instance before flushing: com.chefpay.core.domain.OrderItem`, thrown from
 `OrderService.addItem` the moment `orderRepository.save(order)` flushed. Root cause:
 `Order.items` is mapped as a plain `List<OrderItem>` with `orphanRemoval = true` and no
 `@OrderColumn`, i.e. Hibernate "bag" semantics. Hibernate's flush-time orphan-removal diff for bags
@@ -368,10 +367,8 @@ already fully built server-side from Phase 4 and only missing a client screen:
   (Cash Management nav item, `BILLING_MANAGE`-gated) with a Cash Ledger tab (quick-action buttons
   for Cash Top-Up/Expense/Withdrawal, all posting to the existing `POST /api/billing/cash-movements`
   - Expense and Withdrawal both post the existing `CASH_OUT` type with a different pre-filled reason
-  rather than adding a new movement type/enum/migration) and a Day End tab (the existing cash-summary
-  + sales-summary endpoints for one date, side by side - a read-only report, not a persisted
-  register-close entity, since there's no `Shift` entity to close against yet). One new server
-  endpoint was added to support the ledger table: `GET /api/billing/cash-movements?date=`, returning
+  rather than adding a new movement type/enum/migration) and a Day End tab (the existing cash-summary + sales-summary endpoints for one date, side by side - a read-only report, not a persisted
+  register-close entity, since there's no `Shift` entity to close against yet). One new server endpoint was added to support the ledger table: `GET /api/billing/cash-movements?date=`, returning
   the day's individual entries (the existing cash-summary endpoint only returns aggregated totals).
 - **Added - the Customers directory.** A brand-new module end to end: `Customer` entity (name/phone/
   email/notes/visitCount/totalSpend/lastVisitAt - deliberately no FK from `Order` yet, see that
@@ -460,8 +457,7 @@ None of this needed AskUserQuestion - the request was concrete enough to build d
 assumptions stated here rather than blocking on them. If any of the "read this carefully" notes
 above don't match how you actually want payments confirmed, that's the thing to flag first.
 
-### Round 7: rapid-add race/lock fix, direct-sale items, half/full pricing, kitchen "Advance All",
-### POS quantity stepper, kitchen-only shell, configurable logo, category-based menu drill-down
+### Round 7: rapid-add race/lock fix, direct-sale items, half/full pricing, kitchen "Advance All", POS quantity stepper, kitchen-only shell, configurable logo, category-based menu drill-down
 
 Follow-up bug/feature report after Round 6 shipped, plus a mid-report server stack trace
 (`CannotAcquireLockException` / `SQLITE_BUSY`) that turned out to share the same root cause as the
@@ -526,8 +522,7 @@ reachable here. Everything above was implemented by careful direct reading of th
 contents at each edit site, then checked by an independent review pass that specifically looks for
 DTO field-order mismatches, constructor signature drift, and logic gaps like the two fixed above
 (the menu DTO mismatch and the direct-sale-only-order dead end) - both real, both were caught before
-delivery rather than left for you to hit at runtime. Please still run your usual `mvn clean install`
-+ click-through and report back anything that doesn't look right.
+delivery rather than left for you to hit at runtime. Please still run your usual `mvn clean install` + click-through and report back anything that doesn't look right.
 
 ### Round 7.1: real `mvn test` failures from your machine, plus three click-through reports
 
@@ -2231,8 +2226,7 @@ per-phase" convention):
 
 Four steps, since item 5 above closed the last real gap in this chain:
 
-1. **Create the feature** from the Bistrodesk Admin console's Features tab (`POST /platform/features`)
-   - just a `code` (e.g. `INVENTORY_MANAGEMENT`) and a description. A feature with no plan mapping and
+1. **Create the feature** from the Bistrodesk Admin console's Features tab (`POST /platform/features`) - just a `code` (e.g. `INVENTORY_MANAGEMENT`) and a description. A feature with no plan mapping and
    no controller gate is inert - creating one is a no-op until the next two steps.
 2. **Map it to a plan** from the Plans tab (`CreateOrUpdatePlanRequest.featureCodes`) - this list
    *replaces* the plan's whole feature set on every save, it isn't additive.
@@ -2325,8 +2319,7 @@ Re-ran a *forced* clean `tsc -b --force` (no stale build-info) and `vite build` 
 both pass cleanly. No backend/Java changes this round. No working `mvn`/JVM in this sandbox, same as
 every prior round - still expecting your real Windows build/run loop to be the final word.
 
-## Round 30 — Bistrodesk: the same "unrestricted caller sees every branch" bug, found across Orders
-## Log, Kitchen Display, and Menu, plus a real "Add Table" regression
+## Round 30 — Bistrodesk: the same "unrestricted caller sees every branch" bug, found across Orders Log, Kitchen Display, and Menu, plus a real "Add Table" regression
 
 Round 29's Dashboard fix turned out to be one instance of a systemic gap, not the whole story -
 real-world testing surfaced the identical symptom on the Orders Log, the Kitchen Display, and the
