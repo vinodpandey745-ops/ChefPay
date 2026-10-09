@@ -1,0 +1,31 @@
+# Used by chefpay-server/Dockerfile (build context = repo root).
+# VCS / IDE
+**/.git
+**/.settings
+**/.classpath
+**/.project
+
+# Build output & dependencies (rebuilt inside the image)
+**/target
+**/node_modules
+
+# Local runtime state - never bake a dev database or logs into an image
+data
+logs
+.env
+
+# Not needed by the server image: docs, the web UI (own image) and the desktop client sources
+docs
+**/*.md
+chefpay-web
+chefpay-javafx/src
+chefpay-javafx/*.bat
+
+# Stale web bundles previously committed into the server's static/ folder - the UI now ships in
+# the chefpay-web image. (static/manager and static/admin are hand-written and are KEPT.)
+chefpay-server/src/main/resources/static/assets
+chefpay-server/src/main/resources/static/index.html
+chefpay-server/src/main/resources/static/sw.js
+chefpay-server/src/main/resources/static/manifest.json
+chefpay-server/src/main/resources/static/favicon.svg
+chefpay-server/src/main/resources/static/*.png

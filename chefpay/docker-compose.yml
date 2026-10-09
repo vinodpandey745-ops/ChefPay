@@ -1,0 +1,174 @@
+# ChefPay - full stack, one image per component
+#
+#   chefpay-web     nginx + React UI; public entry point, proxies /api /ws /manager /admin ... :8080 -> ${HTTP_PORT}
+#   chefpay-server  Spring Boot API + WebSocket   (internal only, port 8080)
+#   postgres        PostgreSQL 16   (compose profile "postgres" - default, recommended)
+#   mysql           MySQL 8.4       (compose profile "mysql"    - alternative)
+#
+# SQLite (single-terminal demo): leave COMPOSE_PROFILES empty and set SPRING_PROFILES_ACTIVE=dev.
+# The JavaFX POS client is a desktop app and is not containerised - point its
+# chefpay-client.properties at this stack's host and ${HTTP_PORT}.
+#
+#   cp .env.example .env   # set secrets
+#   docker compose up -d --build
+
+name: chefpay
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    command: caddy reverse-proxy --from ${DOMAIN:?set DOMAIN in .env} --to chefpay-web:8080
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy-data:/data        # certificates live here: never delete this volume
+      - caddy-config:/config
+    depends_on:
+      chefpay-web:
+        condition: service_healthy
+    networks: [chefpay-net]
+
+  chefpay-web:
+    build:
+      context: ./chefpay-web
+      dockerfile: Dockerfile
+    image: chefpay/chefpay-web:${CHEFPAY_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      CHEFPAY_SERVER_HOST: chefpay-server
+      CHEFPAY_SERVER_PORT: "8080"
+      TLS_SERVER_NAME: ${TLS_SERVER_NAME:-localhost}
+      FORCE_HTTPS: ${FORCE_HTTPS:-false}
+      HTTPS_PUBLIC_PORT: ${HTTPS_PORT:-443} 
+    volumes:
+      - chefpay-certs:/etc/nginx/certs
+    depends_on:
+      chefpay-server:
+        condition: service_healthy
+    networks: [chefpay-net]
+
+  chefpay-server:
+    build:
+      context: .                       # repo root: needs parent pom + sibling modules
+      dockerfile: chefpay-server/Dockerfile
+      args:
+        SKIP_TESTS: ${SKIP_TESTS:-true}
+        INSTALL_OCR: ${INSTALL_OCR:-true}
+    image: chefpay/chefpay-server:${CHEFPAY_VERSION:-latest}
+    restart: unless-stopped
+    # Not published by default - reach it through chefpay-web. To debug directly, uncomment:
+    # ports:
+    #   - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-postgres}
+
+      # --- Database (ignored by the SQLite "dev" profile, which uses CHEFPAY_DB_PATH) ---
+      CHEFPAY_DB_URL: ${CHEFPAY_DB_URL:-jdbc:postgresql://postgres:5432/chefpay}
+      CHEFPAY_DB_USER: ${DB_USER:-chefpay}
+      CHEFPAY_DB_PASSWORD: ${DB_PASSWORD:-}
+      CHEFPAY_DB_PATH: /app/data/chefpay.db
+
+      # --- Security (JWT secret is mandatory: the built-in default is public) ---
+      CHEFPAY_SECURITY_JWT_SECRET: ${CHEFPAY_SECURITY_JWT_SECRET:?Set CHEFPAY_SECURITY_JWT_SECRET in .env (openssl rand -base64 48)}
+      CHEFPAY_PLATFORM_OWNER_KEY: ${CHEFPAY_PLATFORM_OWNER_KEY:-}
+
+      # --- Optional integrations (blank = feature refuses requests, never silently opens) ---
+      CHEFPAY_WHATSAPP_WEBHOOK_SECRET: ${CHEFPAY_WHATSAPP_WEBHOOK_SECRET:-}
+      CHEFPAY_RAZORPAY_KEY_ID: ${CHEFPAY_RAZORPAY_KEY_ID:-}
+      CHEFPAY_RAZORPAY_KEY_SECRET: ${CHEFPAY_RAZORPAY_KEY_SECRET:-}
+      CHEFPAY_RAZORPAY_WEBHOOK_SECRET: ${CHEFPAY_RAZORPAY_WEBHOOK_SECRET:-}
+
+      # --- Runtime ---
+      CHEFPAY_LOG_FILE: /app/logs/chefpay-server.log
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - chefpay-data:/app/data   # SQLite file (dev profile only)
+      - chefpay-logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false          # ignored when the "postgres" profile is not active
+      mysql:
+        condition: service_healthy
+        required: false          # ignored when the "mysql" profile is not active
+    stop_grace_period: 30s
+    networks: [chefpay-net]        # healthcheck comes from the image's HEALTHCHECK
+
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chefpay
+      POSTGRES_USER: ${DB_USER:-chefpay}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d chefpay"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [chefpay-net]
+
+  postgres-backup:
+    profiles: ["postgres"]
+    image: prodrigestivill/postgres-backup-local:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: chefpay
+      POSTGRES_USER: ${DB_USER:-chefpay}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-}
+      SCHEDULE: "@daily"
+      BACKUP_KEEP_DAYS: 7
+      BACKUP_KEEP_WEEKS: 4
+      BACKUP_KEEP_MONTHS: 3
+    volumes:
+      - postgres-backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [chefpay-net]
+
+  mysql:
+    profiles: ["mysql"]
+    image: mysql:8.4
+    restart: unless-stopped
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    environment:
+      MYSQL_DATABASE: chefpay
+      MYSQL_USER: ${DB_USER:-chefpay}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [chefpay-net]
+
+
+
+volumes:
+  caddy-data:
+  caddy-config:
+  postgres-backups:
+  chefpay-certs:
+  chefpay-data:
+  chefpay-logs:
+  postgres-data:
+  mysql-data:
+
+networks:
+  chefpay-net:
